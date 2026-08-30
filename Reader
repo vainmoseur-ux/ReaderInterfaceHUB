@@ -1,0 +1,1465 @@
+--========================================================--
+--              READER INTERFACE
+--          WINDUI + AUTO GENERATOR
+--             + AUTO PARRY
+--========================================================--
+
+local WindUI = loadstring(
+    game:HttpGet(
+        "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
+    )
+)()
+
+local Window = WindUI:CreateWindow({
+    Title = "Reader Interface",
+    Icon = "book-open",
+    Author = "by 49|51",
+})
+
+local SurvivorTab = Window:Tab({
+    Title = "Survivor",
+    Icon = "user",
+})
+
+--========================================================--
+-- SERVICES
+--========================================================--
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+--========================================================--
+-- AUTO GENERATOR SETTINGS
+--========================================================--
+
+local Enabled = false
+local Mode = "SUCCESS"
+
+local SUCCESS_MIN = 102
+local SUCCESS_MAX = 116
+
+local NEUTRAL_MIN = 116
+local NEUTRAL_MAX = 159
+
+local TriggerDelay = 0.035
+local LastTrigger = 0
+
+local Busy = false
+local ScourgeActive = false
+local ScourgeRound = 0
+
+--========================================================--
+-- AUTO PARRY SETTINGS
+--========================================================--
+
+local AutoParryEnabled = false
+
+local ParryRange = 12
+
+local RangeVisualEnabled = true
+
+local CurrentKiller = nil
+local KillerAttacking = false
+local LastAttackTime = 0
+
+local LastParryTrigger = 0
+
+--========================================================--
+-- KILLER ANIMATION IDS
+--========================================================--
+
+local AttackAnimations = {
+
+    ["139369275981139"] = true,
+    ["121216847022485"] = true,
+    ["78935059863801"] = true,
+    ["74968262036854"] = true,
+    ["82666958311998"] = true,
+    ["78432063483146"] = true,
+    ["132817836308238"] = true,
+    ["111920872708571"] = true,
+    ["138720291317243"] = true,
+    ["130593238885843"] = true,
+    ["106871536134254"] = true,
+    ["109402730355822"] = true,
+
+}
+
+--========================================================--
+-- KING SCOURGE REMOTES
+--========================================================--
+
+local KingScourgeStart
+local KingScourgeEnd
+
+pcall(function()
+
+    local KillerPerks =
+        ReplicatedStorage:WaitForChild("Remotes")
+            :WaitForChild("KillerPerks")
+
+    local KingScourge =
+        KillerPerks:WaitForChild("kingscourge")
+
+    KingScourgeStart =
+        KingScourge:WaitForChild("KingScourgeStart")
+
+    KingScourgeEnd =
+        KingScourge:WaitForChild("KingScourgeEnd")
+
+end)
+
+--========================================================--
+-- REFERENCES
+--========================================================--
+
+local Check
+local Line
+local Goal
+local Action
+local GuiMob
+
+--========================================================--
+-- REFRESH REFERENCES
+--========================================================--
+
+local function RefreshReferences()
+
+    pcall(function()
+
+        --================================================--
+        -- SKILL CHECK
+        --================================================--
+
+        local SkillGui =
+            PlayerGui:FindFirstChild(
+                "SkillCheckPromptGui"
+            )
+
+        if SkillGui then
+
+            Check =
+                SkillGui:FindFirstChild("Check")
+
+            if Check then
+
+                Line =
+                    Check:FindFirstChild("Line")
+
+                Goal =
+                    Check:FindFirstChild("Goal")
+
+            end
+
+        else
+
+            Check = nil
+            Line = nil
+            Goal = nil
+
+        end
+
+        --================================================--
+        -- SURVIVOR MOBILE
+        --================================================--
+
+        local Survivor =
+            PlayerGui:FindFirstChild(
+                "Survivor-mob"
+            )
+
+        if Survivor then
+
+            local Controls =
+                Survivor:FindFirstChild(
+                    "Controls"
+                )
+
+            if Controls then
+
+                -- Generator action
+                Action =
+                    Controls:FindFirstChild(
+                        "action"
+                    )
+
+                -- Original parry button
+                GuiMob =
+                    Controls:FindFirstChild(
+                        "Gui-mob"
+                    )
+
+            end
+
+        else
+
+            Action = nil
+            GuiMob = nil
+
+        end
+
+    end)
+
+end
+
+RefreshReferences()
+
+--========================================================--
+-- AUTO REFRESH
+--========================================================--
+
+task.spawn(function()
+
+    while true do
+
+        RefreshReferences()
+
+        task.wait(0.5)
+
+    end
+
+end)
+
+--========================================================--
+-- GENERATOR ACTION
+--========================================================--
+
+local function TriggerAction()
+
+    if not Action then
+        RefreshReferences()
+    end
+
+    if not Action then
+        return false
+    end
+
+    local Now = os.clock()
+
+    if Now - LastTrigger < TriggerDelay then
+        return false
+    end
+
+    LastTrigger = Now
+
+    pcall(function()
+
+        if Action:IsA("GuiButton") then
+            Action:Activate()
+        end
+
+    end)
+
+    if typeof(firesignal) == "function" then
+
+        pcall(function()
+
+            firesignal(
+                Action.MouseButton1Down
+            )
+
+        end)
+
+    end
+
+    return true
+
+end
+
+--========================================================--
+-- ANGLE
+--========================================================--
+
+local function GetAngle()
+
+    if not Line or not Goal then
+        return nil
+    end
+
+    return
+        tonumber(Line.Rotation) or 0,
+        tonumber(Goal.Rotation) or 0
+
+end
+
+--========================================================--
+-- SUCCESS
+--========================================================--
+
+local function IsSuccess()
+
+    local LineRotation, GoalRotation =
+        GetAngle()
+
+    if not LineRotation then
+        return false
+    end
+
+    local Min =
+        GoalRotation + SUCCESS_MIN
+
+    local Max =
+        GoalRotation + SUCCESS_MAX
+
+    return
+        LineRotation >= Min
+        and
+        LineRotation <= Max
+
+end
+
+--========================================================--
+-- NEUTRAL
+--========================================================--
+
+local function IsNeutral()
+
+    local LineRotation, GoalRotation =
+        GetAngle()
+
+    if not LineRotation then
+        return false
+    end
+
+    local Min =
+        GoalRotation + NEUTRAL_MIN
+
+    local Max =
+        GoalRotation + NEUTRAL_MAX
+
+    return
+        LineRotation > Min
+        and
+        LineRotation <= Max
+
+end
+
+--========================================================--
+-- INSTANT NORMAL
+--========================================================--
+
+local function InstantNormal()
+
+    if not Check or not Line or not Goal then
+        RefreshReferences()
+    end
+
+    if not Check or not Line or not Goal then
+        return
+    end
+
+    if not Check.Visible then
+        return
+    end
+
+    local GoalRotation =
+        tonumber(Goal.Rotation) or 0
+
+    Line.Rotation =
+        GoalRotation + 109
+
+    TriggerAction()
+
+end
+
+--========================================================--
+-- INSTANT KING SCOURGE
+--========================================================--
+
+local function InstantScourge()
+
+    if not Enabled then
+        return
+    end
+
+    if not ScourgeActive then
+        return
+    end
+
+    if not Line or not Goal then
+        RefreshReferences()
+    end
+
+    if not Line or not Goal then
+        return
+    end
+
+    local GoalRotation =
+        tonumber(Goal.Rotation) or 0
+
+    Line.Rotation =
+        GoalRotation + 109
+
+    TriggerAction()
+
+    ScourgeRound =
+        ScourgeRound + 1
+
+end
+
+--========================================================--
+-- KING SCOURGE START
+--========================================================--
+
+if KingScourgeStart then
+
+    KingScourgeStart.OnClientEvent:Connect(
+        function()
+
+            if not Enabled then
+                return
+            end
+
+            ScourgeActive = true
+            ScourgeRound = 0
+            Busy = false
+
+            task.defer(function()
+
+                if not Enabled then
+                    return
+                end
+
+                if Mode == "INSTANT" then
+                    InstantScourge()
+                end
+
+            end)
+
+        end
+    )
+
+end
+
+--========================================================--
+-- KING SCOURGE END
+--========================================================--
+
+if KingScourgeEnd then
+
+    KingScourgeEnd.OnClientEvent:Connect(
+        function()
+
+            ScourgeActive = false
+            Busy = false
+
+        end
+    )
+
+end
+
+--========================================================--
+-- NORMAL SKILL CHECK
+--========================================================--
+
+local PreviousVisible = false
+
+RunService.RenderStepped:Connect(function()
+
+    if not Enabled then
+
+        PreviousVisible = false
+
+        return
+
+    end
+
+    if not Check then
+        RefreshReferences()
+    end
+
+    if not Check then
+        return
+    end
+
+    local Visible =
+        Check.Visible
+
+    --====================================================--
+    -- NEW SKILL CHECK
+    --====================================================--
+
+    if Visible and not PreviousVisible then
+
+        Busy = false
+
+        if not ScourgeActive then
+
+            if Mode == "INSTANT" then
+                InstantNormal()
+            end
+
+        end
+
+    end
+
+    PreviousVisible =
+        Visible
+
+    --====================================================--
+    -- NORMAL SUCCESS
+    --====================================================--
+
+    if Visible and not ScourgeActive then
+
+        if not Busy then
+
+            local ShouldTrigger = false
+
+            if Mode == "SUCCESS" then
+
+                ShouldTrigger =
+                    IsSuccess()
+
+            elseif Mode == "NEUTRAL" then
+
+                ShouldTrigger =
+                    IsNeutral()
+
+            end
+
+            if ShouldTrigger then
+
+                Busy = true
+
+                TriggerAction()
+
+                task.delay(0.07, function()
+
+                    Busy = false
+
+                end)
+
+            end
+
+        end
+
+    end
+
+    --====================================================--
+    -- KING SCOURGE
+    --====================================================--
+
+    if ScourgeActive and Visible then
+
+        if Mode == "SUCCESS" then
+
+            if not Busy and IsSuccess() then
+
+                Busy = true
+
+                TriggerAction()
+
+                task.delay(0.06, function()
+
+                    Busy = false
+
+                end)
+
+            end
+
+        elseif Mode == "NEUTRAL" then
+
+            if not Busy and IsNeutral() then
+
+                Busy = true
+
+                TriggerAction()
+
+                task.delay(0.06, function()
+
+                    Busy = false
+
+                end)
+
+            end
+
+        elseif Mode == "INSTANT" then
+
+            local CurrentGoal =
+                tonumber(Goal.Rotation) or 0
+
+            local CurrentLine =
+                tonumber(Line.Rotation) or 0
+
+            local Distance =
+                math.abs(
+                    CurrentLine -
+                    CurrentGoal
+                )
+
+            if Distance > 130 then
+                Busy = false
+            end
+
+        end
+
+    end
+
+end)
+
+--========================================================--
+-- KING SCOURGE GOAL CHANGE DETECTOR
+--========================================================--
+
+task.spawn(function()
+
+    local LastGoalRotation = nil
+
+    while true do
+
+        if Enabled
+            and ScourgeActive
+            and Mode == "INSTANT" then
+
+            RefreshReferences()
+
+            if Check
+                and Check.Visible
+                and Goal
+                and Line then
+
+                local CurrentGoal =
+                    tonumber(Goal.Rotation) or 0
+
+                if LastGoalRotation == nil then
+
+                    LastGoalRotation =
+                        CurrentGoal
+
+                    InstantScourge()
+
+                elseif
+                    math.abs(
+                        CurrentGoal -
+                        LastGoalRotation
+                    ) > 1 then
+
+                    LastGoalRotation =
+                        CurrentGoal
+
+                    InstantScourge()
+
+                end
+
+            end
+
+        else
+
+            LastGoalRotation = nil
+
+        end
+
+        task.wait(0.005)
+
+    end
+
+end)
+
+--========================================================--
+-- AUTO PARRY
+--========================================================--
+
+local function IsKillerCharacter(character)
+
+    if not character then
+        return false
+    end
+
+    return
+        character:FindFirstChild(
+            "Lookscriptkiller",
+            true
+        ) ~= nil
+
+end
+
+--========================================================--
+-- GET PLAYER ROOT
+--========================================================--
+
+local function GetRoot(character)
+
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChild(
+        "HumanoidRootPart"
+    )
+
+end
+
+--========================================================--
+-- GET DISTANCE TO KILLER
+--========================================================--
+
+local function GetKillerDistance(character)
+
+    local MyCharacter =
+        LocalPlayer.Character
+
+    local MyRoot =
+        GetRoot(MyCharacter)
+
+    local KillerRoot =
+        GetRoot(character)
+
+    if not MyRoot or not KillerRoot then
+        return math.huge
+    end
+
+    return (
+        KillerRoot.Position -
+        MyRoot.Position
+    ).Magnitude
+
+end
+
+--========================================================--
+-- ORIGINAL PARRY BUTTON
+--========================================================--
+
+local function RefreshGuiMob()
+
+    if GuiMob
+        and GuiMob.Parent then
+
+        return true
+
+    end
+
+    RefreshReferences()
+
+    return GuiMob ~= nil
+
+end
+
+--========================================================--
+-- TRIGGER ORIGINAL PARRY
+--========================================================--
+-- Tidak memanggil ParryClient secara langsung.
+-- Tidak membuat ParryClient baru.
+-- Tidak menggunakan parry Remote secara langsung.
+--
+-- Gui-mob tetap menjadi input yang digunakan oleh
+-- ParryClient asli.
+--========================================================--
+
+local function TriggerOriginalParry()
+
+    if not AutoParryEnabled then
+        return false
+    end
+
+    if not RefreshGuiMob() then
+        return false
+    end
+
+    local Now =
+        os.clock()
+
+    -- Proteksi terhadap trigger berulang
+    if Now - LastParryTrigger < 0.05 then
+        return false
+    end
+
+    LastParryTrigger =
+        Now
+
+    pcall(function()
+
+        if GuiMob:IsA("GuiButton") then
+            GuiMob:Activate()
+        end
+
+    end)
+
+    if typeof(firesignal) == "function" then
+
+        pcall(function()
+
+            firesignal(
+                GuiMob.MouseButton1Down
+            )
+
+        end)
+
+    end
+
+    return true
+
+end
+
+--========================================================--
+-- ANIMATION ID
+--========================================================--
+
+local function GetAnimationId(track)
+
+    if not track then
+        return nil
+    end
+
+    local Animation =
+        track.Animation
+
+    if not Animation then
+        return nil
+    end
+
+    local AnimationId =
+        Animation.AnimationId
+
+    if not AnimationId then
+        return nil
+    end
+
+    return tostring(
+        AnimationId
+    ):match("%d+")
+
+end
+
+--========================================================--
+-- KILLER ATTACK DETECTION
+--========================================================--
+
+local function OnKillerAnimation(
+    KillerCharacter,
+    Track
+)
+
+    if not AutoParryEnabled then
+        return
+    end
+
+    if not IsKillerCharacter(
+        KillerCharacter
+    ) then
+        return
+    end
+
+    local AnimationId =
+        GetAnimationId(Track)
+
+    if not AnimationId then
+        return
+    end
+
+    if not AttackAnimations[
+        AnimationId
+    ] then
+
+        return
+
+    end
+
+    local Distance =
+        GetKillerDistance(
+            KillerCharacter
+        )
+
+    if Distance > ParryRange then
+        return
+    end
+
+    --====================================================--
+    -- ATTACK CONFIRMED
+    --====================================================--
+
+    CurrentKiller =
+        KillerCharacter
+
+    KillerAttacking =
+        true
+
+    LastAttackTime =
+        os.clock()
+
+    -- Langsung trigger tanpa delay
+    TriggerOriginalParry()
+
+end
+
+--========================================================--
+-- WATCH KILLER ANIMATOR
+--========================================================--
+
+local WatchedAnimators = {}
+
+local function WatchKiller(
+    KillerCharacter
+)
+
+    if not KillerCharacter then
+        return
+    end
+
+    if WatchedAnimators[
+        KillerCharacter
+    ] then
+
+        return
+
+    end
+
+    local Humanoid =
+        KillerCharacter:FindFirstChildOfClass(
+            "Humanoid"
+        )
+
+    if not Humanoid then
+        return
+    end
+
+    local Animator =
+        Humanoid:FindFirstChildOfClass(
+            "Animator"
+        )
+
+    if not Animator then
+        return
+    end
+
+    WatchedAnimators[
+        KillerCharacter
+    ] = Animator
+
+    Animator.AnimationPlayed:Connect(
+        function(Track)
+
+            OnKillerAnimation(
+                KillerCharacter,
+                Track
+            )
+
+        end
+    )
+
+end
+
+--========================================================--
+-- KILLER SCANNER
+--========================================================--
+
+task.spawn(function()
+
+    while true do
+
+        for _, Player in ipairs(
+            Players:GetPlayers()
+        ) do
+
+            if Player ~= LocalPlayer then
+
+                local Character =
+                    Player.Character
+
+                if Character
+                    and IsKillerCharacter(
+                        Character
+                    ) then
+
+                    WatchKiller(
+                        Character
+                    )
+
+                end
+
+            end
+
+        end
+
+        task.wait(0.1)
+
+    end
+
+end)
+
+--========================================================--
+-- ATTACK STATE / RANGE
+--========================================================--
+
+local function UpdateParryState()
+
+    if not KillerAttacking then
+        return
+    end
+
+    if not CurrentKiller then
+
+        KillerAttacking = false
+        return
+
+    end
+
+    local Distance =
+        GetKillerDistance(
+            CurrentKiller
+        )
+
+    if Distance > ParryRange then
+
+        KillerAttacking = false
+
+    end
+
+    if os.clock() -
+        LastAttackTime > 1 then
+
+        KillerAttacking = false
+        CurrentKiller = nil
+
+    end
+
+end
+
+--========================================================--
+-- RANGE RING
+--========================================================--
+
+local RangeRing =
+    Instance.new("Part")
+
+RangeRing.Name =
+    "ReaderAutoParryRange"
+
+RangeRing.Shape =
+    Enum.PartType.Cylinder
+
+RangeRing.Anchored =
+    true
+
+RangeRing.CanCollide =
+    false
+
+RangeRing.CanTouch =
+    false
+
+RangeRing.CanQuery =
+    false
+
+RangeRing.Material =
+    Enum.Material.Neon
+
+RangeRing.Transparency =
+    0.45
+
+RangeRing.Color =
+    Color3.fromRGB(
+        255,
+        0,
+        0
+    )
+
+RangeRing.Size =
+    Vector3.new(
+        0.08,
+        ParryRange * 2,
+        ParryRange * 2
+    )
+
+RangeRing.Parent =
+    workspace
+
+--========================================================--
+-- RANGE VISUAL UPDATE
+--========================================================--
+
+local function UpdateRangeRing()
+
+    local Character =
+        LocalPlayer.Character
+
+    local Root =
+        GetRoot(Character)
+
+    if not Root then
+
+        RangeRing.Transparency =
+            1
+
+        return
+
+    end
+
+    if not RangeVisualEnabled then
+
+        RangeRing.Transparency =
+            1
+
+        return
+
+    end
+
+    RangeRing.Transparency =
+        0.45
+
+    RangeRing.Size =
+        Vector3.new(
+            0.08,
+            ParryRange * 2,
+            ParryRange * 2
+        )
+
+    RangeRing.CFrame =
+        CFrame.new(
+            Root.Position -
+            Vector3.new(
+                0,
+                2.8,
+                0
+            )
+        )
+        *
+        CFrame.Angles(
+            0,
+            0,
+            math.rad(90)
+        )
+
+    --====================================================--
+    -- GREEN = KILLER ATTACKING INSIDE RANGE
+    -- RED = NORMAL RANGE
+    --====================================================--
+
+    if KillerAttacking
+        and CurrentKiller then
+
+        local Distance =
+            GetKillerDistance(
+                CurrentKiller
+            )
+
+        if Distance <= ParryRange then
+
+            RangeRing.Color =
+                Color3.fromRGB(
+                    0,
+                    255,
+                    0
+                )
+
+            return
+
+        end
+
+    end
+
+    RangeRing.Color =
+        Color3.fromRGB(
+            255,
+            0,
+            0
+        )
+
+end
+
+--========================================================--
+-- RANGE UPDATE
+--========================================================--
+
+RunService.RenderStepped:Connect(
+    function()
+
+        UpdateParryState()
+        UpdateRangeRing()
+
+    end
+)
+
+--========================================================--
+-- RESPAWN
+--========================================================--
+
+LocalPlayer.CharacterAdded:Connect(
+    function()
+
+        Busy = false
+        ScourgeActive = false
+        PreviousVisible = false
+
+        CurrentKiller = nil
+        KillerAttacking = false
+
+        task.wait(1)
+
+        RefreshReferences()
+
+    end
+)
+
+--========================================================--
+-- WINDUI : MODE
+--========================================================--
+
+local ModeDropdown =
+    SurvivorTab:Dropdown({
+
+        Title = "Mode",
+
+        Values = {
+            "Legit",
+            "Instant"
+        },
+
+        Value = "Legit",
+
+        Callback = function(
+            selected
+        )
+
+            if selected == "Legit" then
+
+                Mode =
+                    "SUCCESS"
+
+            elseif selected == "Instant" then
+
+                Mode =
+                    "INSTANT"
+
+            end
+
+            Busy = false
+
+        end
+
+    })
+
+--========================================================--
+-- WINDUI : AUTO GENERATOR
+--========================================================--
+
+local AutoGeneratorToggle =
+    SurvivorTab:Toggle({
+
+        Title = "Auto Generator",
+
+        Value = false,
+
+        Callback = function(
+            state
+        )
+
+            Enabled =
+                state
+
+            Busy = false
+
+            if not Enabled then
+
+                ScourgeActive =
+                    false
+
+                PreviousVisible =
+                    false
+
+            end
+
+        end
+
+    })
+
+--========================================================--
+-- WINDUI : RING COLOR
+--========================================================--
+
+local RingColorDropdown =
+    SurvivorTab:Dropdown({
+
+        Title = "Ring Color",
+
+        Values = {
+            "Red",
+            "Green",
+            "Blue",
+            "Cyan",
+            "Purple"
+        },
+
+        Value = "Red",
+
+        Callback = function(
+            selected
+        )
+
+            local Colors = {
+
+                Red =
+                    Color3.fromRGB(
+                        255,
+                        0,
+                        0
+                    ),
+
+                Green =
+                    Color3.fromRGB(
+                        0,
+                        255,
+                        0
+                    ),
+
+                Blue =
+                    Color3.fromRGB(
+                        0,
+                        100,
+                        255
+                    ),
+
+                Cyan =
+                    Color3.fromRGB(
+                        0,
+                        255,
+                        255
+                    ),
+
+                Purple =
+                    Color3.fromRGB(
+                        180,
+                        0,
+                        255
+                    ),
+
+            }
+
+            -- Warna pilihan hanya digunakan
+            -- ketika tidak sedang menunjukkan
+            -- status attack.
+
+            if not KillerAttacking then
+
+                RangeRing.Color =
+                    Colors[selected]
+                    or Colors.Red
+
+            end
+
+        end
+
+    })
+
+--========================================================--
+-- WINDUI : PARRY RANGE
+--========================================================--
+
+local ParryRangeSlider =
+    SurvivorTab:Slider({
+
+        Title = "Parry Range",
+
+        Value = {
+
+            Min = 1,
+            Max = 32,
+            Default = 12
+
+        },
+
+        Callback = function(
+            value
+        )
+
+            ParryRange =
+                math.clamp(
+                    tonumber(value)
+                    or 12,
+                    1,
+                    32
+                )
+
+        end
+
+    })
+
+--========================================================--
+-- WINDUI : RANGE VISUAL
+--========================================================--
+
+local RangeVisualToggle =
+    SurvivorTab:Toggle({
+
+        Title = "Range Visual",
+
+        Value = true,
+
+        Callback = function(
+            state
+        )
+
+            RangeVisualEnabled =
+                state
+
+            if not state then
+
+                RangeRing.Transparency =
+                    1
+
+            end
+
+        end
+
+    })
+
+--========================================================--
+-- WINDUI : AUTO PARRY
+--========================================================--
+
+local AutoParryToggle =
+    SurvivorTab:Toggle({
+
+        Title = "Auto Parry",
+
+        Value = false,
+
+        Callback = function(
+            state
+        )
+
+            AutoParryEnabled =
+                state
+
+            if not state then
+
+                KillerAttacking =
+                    false
+
+                CurrentKiller =
+                    nil
+
+            end
+
+        end
+
+    })
+
+--========================================================--
+-- INITIAL MESSAGE
+--========================================================--
+
+print(
+    "[Reader Interface] Loaded."
+)
+
+print(
+    "[Reader Interface] Auto Generator ready."
+)
+
+print(
+    "[Reader Interface] Auto Parry ready."
+)
+
+print(
+    "[Reader Interface] Parry Range:",
+    ParryRange
+)
+
+--========================================================--
+-- END
+--========================================================--
