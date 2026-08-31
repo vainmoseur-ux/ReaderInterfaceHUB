@@ -34,6 +34,147 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 --========================================================--
+-- SILENT AIM CORE
+--========================================================--
+
+local Camera = workspace.CurrentCamera
+
+local SilentAimSettings = {
+    Enabled = false,
+    AimPart = "HumanoidRootPart",
+    MaxDistance = 500,
+    Prediction = 0.165
+}
+
+local TargetRemotes = {
+    "spearthrow",
+    "slowattack",
+    "afterattack"
+}
+
+local function IsValidSurvivor(player)
+    if not player or player == LocalPlayer then return false end
+    local character = player.Character
+    if not character or character == LocalPlayer.Character then return false end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+
+    local function hasKillerWeapon(parent)
+        if not parent then return false end
+        for _, item in ipairs(parent:GetChildren()) do
+            if item:IsA("Tool") or item:IsA("Model") then
+                local name = item.Name:lower()
+                if name:find("veil") or name:find("spear") or name:find("tombak") then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    if hasKillerWeapon(character) or hasKillerWeapon(player:FindFirstChild("Backpack")) then
+        return false
+    end
+
+    return true
+end
+
+local function GetClosestSurvivor()
+    local closestPlayer = nil
+    local shortestDistance = SilentAimSettings.MaxDistance
+
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if IsValidSurvivor(player) then
+            local targetPart = player.Character:FindFirstChild(SilentAimSettings.AimPart)
+            if targetPart then
+                local distance, onScreen
+                if UserInputService.TouchEnabled then
+                    distance = (targetPart.Position - myRoot.Position).Magnitude
+                    onScreen = true
+                else
+                    local screenPos
+                    screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen then
+                        distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    end
+                end
+
+                if onScreen and distance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = distance
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+
+    if SilentAimSettings.Enabled and (method == "FireServer" or method == "InvokeServer") then
+        local remoteName = string.lower(self.Name)
+        local isAttack = false
+        for _, name in ipairs(TargetRemotes) do
+            if string.find(remoteName, name) then
+                isAttack = true
+                break
+            end
+        end
+
+        if isAttack then
+            local args = {...}
+            local argCount = select("#", ...)
+            local target = GetClosestSurvivor()
+
+            if target then
+                local targetPart = target.Character:FindFirstChild(SilentAimSettings.AimPart)
+                if targetPart then
+                    local targetPos = targetPart.Position + (targetPart.Velocity * SilentAimSettings.Prediction)
+                    local myChar = LocalPlayer.Character
+                    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    local myPos = myRoot and myRoot.Position or Camera.CFrame.Position
+
+                    local modified = false
+
+                    for i = 1, argCount do
+                        local arg = args[i]
+                        if typeof(arg) == "Vector3" then
+                            if arg.Magnitude > 0 and arg.Magnitude <= 2 then
+                                args[i] = (targetPos - myPos).Unit
+                                modified = true
+                            elseif (arg - myPos).Magnitude > 8 then
+                                args[i] = targetPos
+                                modified = true
+                            end
+                        elseif typeof(arg) == "CFrame" then
+                            args[i] = CFrame.lookAt(arg.Position, targetPos)
+                            modified = true
+                        end
+                    end
+
+                    if modified then
+                        return OldNamecall(self, unpack(args, 1, argCount))
+                    end
+                end
+            end
+        end
+    end
+
+    return OldNamecall(self, ...)
+end)
+
+--========================================================--
 -- AUTO GENERATOR SETTINGS
 --========================================================--
 
@@ -1440,26 +1581,45 @@ local AutoParryToggle =
     })
 
 --========================================================--
--- INITIAL MESSAGE
+-- KILLER TAB
 --========================================================--
 
-print(
-    "[Reader Interface] Loaded."
-)
+local KillerTab = Window:Tab({
+    Title = "Killer",
+    Icon = "sword"
+})
 
-print(
-    "[Reader Interface] Auto Generator ready."
-)
+-- Toggle Silent Aim
+local SilentAimToggle = KillerTab:Toggle({
+    Title = "Silent Aim (Veil)",
+    Value = false,
+    Callback = function(state)
+        SilentAimSettings.Enabled = state
+    end
+})
 
-print(
-    "[Reader Interface] Auto Parry ready."
-)
+-- Slider Prediction (detik)
+local PredictionSlider = KillerTab:Slider({
+    Title = "Prediction",
+    Value = {
+        Min = 0,
+        Max = 1,
+        Default = 0.165
+    },
+    Callback = function(value)
+        SilentAimSettings.Prediction = tonumber(value) or 0.165
+    end
+})
 
-print(
-    "[Reader Interface] Parry Range:",
-    ParryRange
-)
-
---========================================================--
--- END
---========================================================--
+-- Slider Max Distance
+local DistanceSlider = KillerTab:Slider({
+    Title = "Max Distance",
+    Value = {
+        Min = 0,
+        Max = 500,
+        Default = 100
+    },
+    Callback = function(value)
+        SilentAimSettings.MaxDistance = tonumber(value) or 500
+    end
+})
