@@ -34,6 +34,142 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 --========================================================--
+-- SILENT AIM CORE (REVISED - ARAH SAJA)
+--========================================================--
+
+local Camera = workspace.CurrentCamera
+
+local SilentAimSettings = {
+    Enabled = false,
+    AimPart = "HumanoidRootPart",
+    MaxDistance = 500,
+    Prediction = 0.165
+}
+
+local TargetRemotes = {
+    "spearthrow",
+    "slowattack",
+    "afterattack"
+}
+
+-- Validasi target survivor (bukan diri sendiri, bukan killer lain)
+local function IsValidSurvivor(player)
+    if not player or player == LocalPlayer then return false end
+    local character = player.Character
+    if not character or character == LocalPlayer.Character then return false end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+
+    local function hasKillerWeapon(parent)
+        if not parent then return false end
+        for _, item in ipairs(parent:GetChildren()) do
+            if item:IsA("Tool") or item:IsA("Model") then
+                local name = item.Name:lower()
+                if name:find("veil") or name:find("spear") or name:find("tombak") then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    if hasKillerWeapon(character) or hasKillerWeapon(player:FindFirstChild("Backpack")) then
+        return false
+    end
+
+    return true
+end
+
+-- Mendapatkan survivor terdekat dari crosshair (PC) atau pusat layar (mobile)
+local function GetClosestSurvivorToCrosshair()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    local isMobile = UserInputService.TouchEnabled
+    local mousePos = UserInputService:GetMouseLocation()
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if IsValidSurvivor(player) then
+            local targetPart = player.Character:FindFirstChild(SilentAimSettings.AimPart)
+            if targetPart then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local distance
+                    if isMobile then
+                        -- Mobile: jarak dari pusat layar (anggap arah hadap ke depan)
+                        distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    else
+                        -- PC: jarak dari posisi mouse
+                        distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    end
+
+                    -- Filter jarak 3D agar tidak terlalu jauh
+                    local distance3D = (targetPart.Position - myRoot.Position).Magnitude
+                    if distance3D <= SilentAimSettings.MaxDistance and distance < shortestDistance then
+                        closestPlayer = player
+                        shortestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+
+    if SilentAimSettings.Enabled and (method == "FireServer" or method == "InvokeServer") then
+        local remoteName = string.lower(self.Name)
+        local isAttack = false
+        for _, name in ipairs(TargetRemotes) do
+            if string.find(remoteName, name) then
+                isAttack = true
+                break
+            end
+        end
+
+        if isAttack then
+            local args = {...}
+            local argCount = select("#", ...)
+            local target = GetClosestSurvivorToCrosshair()
+
+            if target then
+                local targetPart = target.Character:FindFirstChild(SilentAimSettings.AimPart)
+                if targetPart then
+                    -- Prediksi pergerakan survivor
+                    local targetPos = targetPart.Position + (targetPart.Velocity * SilentAimSettings.Prediction)
+
+                    local myChar = LocalPlayer.Character
+                    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    local myPos = myRoot and myRoot.Position or Camera.CFrame.Position
+
+                    -- Arah dari posisi kita ke target
+                    local direction = (targetPos - myPos).Unit
+
+                    -- Hanya ubah args[1] (arah lemparan) jika Vector3
+                    if argCount >= 1 and typeof(args[1]) == "Vector3" then
+                        args[1] = direction
+                        return OldNamecall(self, unpack(args, 1, argCount))
+                    end
+                end
+            end
+        end
+    end
+
+    return OldNamecall(self, ...)
+end)
+
+--========================================================--
 -- SILENT AIM CORE
 --========================================================--
 
@@ -1580,16 +1716,11 @@ local AutoParryToggle =
 
     })
 
---========================================================--
--- KILLER TAB
---========================================================--
-
 local KillerTab = Window:Tab({
     Title = "Killer",
     Icon = "sword"
 })
 
--- Toggle Silent Aim
 local SilentAimToggle = KillerTab:Toggle({
     Title = "Silent Aim (Veil)",
     Value = false,
@@ -1598,11 +1729,10 @@ local SilentAimToggle = KillerTab:Toggle({
     end
 })
 
--- Slider Prediction (detik)
 local PredictionSlider = KillerTab:Slider({
     Title = "Prediction",
     Value = {
-        Min = -1,
+        Min = 0,
         Max = 1,
         Default = 0.165
     },
@@ -1611,13 +1741,12 @@ local PredictionSlider = KillerTab:Slider({
     end
 })
 
--- Slider Max Distance
 local DistanceSlider = KillerTab:Slider({
     Title = "Max Distance",
     Value = {
         Min = 0,
         Max = 500,
-        Default = 100
+        Default = 500
     },
     Callback = function(value)
         SilentAimSettings.MaxDistance = tonumber(value) or 500
